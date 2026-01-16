@@ -1,0 +1,159 @@
+pipeline:
+  name: frontend-ci
+  identifier: frontend_ci
+  projectIdentifier: OnlineBoutique
+  orgIdentifier: default
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: online-boutique
+        build: <+input>
+
+  stages:
+
+    # =========================
+    # STAGE 1: TEST & SONAR
+    # =========================
+    - stage:
+        name: Test_and_Sonar
+        identifier: Test_and_Sonar
+        type: CI
+        spec:
+          cloneCodebase: true
+
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: harness-kubernetes
+              namespace: harness-ci
+              automountServiceAccountToken: true
+              os: Linux
+
+          execution:
+            steps:
+
+              # --- Unit Tests ---
+              - step:
+                  type: Run
+                  name: Frontend Unit Tests
+                  identifier: frontend_unit_tests
+                  spec:
+                    image: golang:1.20
+                    shell: Sh
+                    command: |
+                      cd src/frontend
+                      go test ./...
+
+              # --- SonarQube Scan ---
+              - step:
+                  type: Run
+                  name: SonarQube Scan
+                  identifier: sonar_scan
+                  spec:
+                    image: sonarsource/sonar-scanner-cli:latest
+                    shell: Sh
+                    command: |
+                      cd src/frontend
+                      sonar-scanner \
+                        -Dsonar.projectKey=online-boutique \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=<+secrets.getValue("SONAR_URL")> \
+                        -Dsonar.login=<+secrets.getValue("SONAR_TOKEN")>
+
+    # =========================
+    # STAGE 2: BUILD & PUSH
+    # =========================
+    - stage:
+        name: Build_and_Push
+        identifier: Build_and_Push
+        type: CI
+        spec:
+          cloneCodebase: true
+
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: harness-kubernetes
+              namespace: harness-ci
+              automountServiceAccountToken: true
+              os: Linux
+
+          execution:
+            steps:
+
+              # --- Docker Build ---
+              - step:
+                  type: Run
+                  name: Docker Build
+                  identifier: docker_build
+                  spec:
+                    image: docker:24.0.5
+                    shell: Sh
+                    command: |
+                      cd src/frontend
+                      docker build -t frontend:<+codebase.commitSha> .
+
+              # --- Trivy Scan ---
+              - step:
+                  type: Run
+                  name: Trivy Image Scan
+                  identifier: trivy_scan
+                  spec:
+                    image: aquasec/trivy:latest
+                    shell: Sh
+                    command: |
+                      trivy image --severity HIGH,CRITICAL \
+                        --format json \
+                        --output trivy-report.json \
+                        frontend:<+codebase.commitSha>
+
+              # --- Upload Trivy Report to S3 ---
+              - step:
+                  type: Run
+                  name: Upload Trivy Report to S3
+                  identifier: upload_trivy_report
+                  spec:
+                    image: amazon/aws-cli:latest
+                    shell: Sh
+                    command: |
+                      aws s3 cp trivy-report.json \
+                        s3://online-boutique-ci-reports-abhi/frontend/trivy-report-<+codebase.commitSha>.json \
+                        --region us-east-1
+                  envVariables:
+                    AWS_REGION: us-east-1
+                  connectorRef: AWS-Harness
+
+              # --- Push Image to ECR ---
+              - step:
+                  type: Run
+                  name: Push Image to ECR
+                  identifier: push_to_ecr
+                  spec:
+                    image: docker:24.0.5
+                    shell: Sh
+                    command: |
+                      aws ecr get-login-password --region us-east-1 \
+                        | docker login --username AWS \
+                          --password-stdin <+env.AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+
+                      docker tag frontend:<+codebase.commitSha> \
+                        <+env.AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/frontend-abhi:<+codebase.commitSha>
+
+                      docker push \
+                        <+env.AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/frontend-abhi:<+codebase.commitSha>
+                  connectorRef: AWS-Harness
+
+              # --- Slack Notification ---
+              - step:
+                  type: Run
+                  name: Slack Notification
+                  identifier: slack_notify
+                  spec:
+                    image: curlimages/curl:latest
+                    shell: Sh
+                    command: |
+                      curl -X POST -H 'Content-type: application/json' \
+                      --data "{
+                        \"text\": \"✅ Frontend CI completed successfully.\nImage: frontend-abhi:<+codebase.commitSha>\"
+                      }" <+secrets.getValue("SLACK_WEBHOOK")>
