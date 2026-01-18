@@ -1,0 +1,14 @@
+inputSet:
+  name: Build_abdtamboli_Microservice_Kubernetes_1768697483094-pr-trigger-input-set
+  identifier: Build_abdtamboli_Microservice_Kubernetes_1768697483094prtriggerinputset
+  orgIdentifier: default
+  projectIdentifier: OnlineBoutique
+  pipeline:
+    identifier: Build_abdtamboli_Microservice_Kubernetes_1768697483094
+    properties:
+      ci:
+        codebase:
+          build:
+            type: PR
+            spec:
+              number: <+trigger.prNumber>
