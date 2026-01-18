@@ -1,0 +1,35 @@
+pipeline:
+  identifier: Build_abdtamboli_Microservice_Kubernetes_1768697483094
+  name: Build Microservice-Kubernetes
+  orgIdentifier: default
+  projectIdentifier: OnlineBoutique
+  properties:
+    ci:
+      codebase:
+        build: <+input>
+        connectorRef: account.Github
+        repoName: abdtamboli/Microservice-Kubernetes
+  stages:
+    - stage:
+        identifier: build
+        name: build
+        spec:
+          caching:
+            enabled: true
+          cloneCodebase: true
+          execution:
+            steps:
+              - step:
+                  identifier: echo
+                  name: echo
+                  spec:
+                    command: echo hello world
+                  timeout: ""
+                  type: Run
+          platform:
+            arch: Amd64
+            os: Linux
+          runtime:
+            spec: {}
+            type: Docker
+        type: CI
